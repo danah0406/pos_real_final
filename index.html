@@ -453,20 +453,13 @@
     </div>
   </div>
 
-  <!-- 스크립트 (Firebase + 앱 로직) -->
-  <script type="module">
-    import { initializeApp } from "https://www.gstatic.com/firebasejs/12.6.0/firebase-app.js";
-    import {
-      getDatabase,
-      ref,
-      set,
-      update,
-      push,
-      onValue,
-      get
-    } from "https://www.gstatic.com/firebasejs/12.6.0/firebase-database.js";
+  <!-- Firebase 호환(compat) SDK -->
+  <script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-database-compat.js"></script>
 
-    // 단아님 Firebase 설정
+  <!-- 앱 로직 -->
+  <script>
+    // 1) Firebase 초기화
     const firebaseConfig = {
       apiKey: "AIzaSyD1nf0_M1hO6DLEbJds-_dDM_AjGiwxv8E",
       authDomain: "school-festival-pos.firebaseapp.com",
@@ -478,13 +471,12 @@
       measurementId: "G-H99PQRC48F"
     };
 
-    const app = initializeApp(firebaseConfig);
-    const db  = getDatabase(app);
+    firebase.initializeApp(firebaseConfig);
+    const db = firebase.database();
+    const sessionRef = db.ref("session");
+    const ordersRef  = db.ref("orders");
 
-    const sessionRef = ref(db, "session");
-    const ordersRef  = ref(db, "orders");
-
-    // 메뉴 데이터
+    // 2) 메뉴 데이터
     const menuGroup1 = [
       {name:"불닭 컵", price:1500},
       {name:"불닭 까르보 컵", price:1500},
@@ -504,19 +496,21 @@
       {name:"퍼스널컬러", price:1000},
     ];
 
-    // 페이지 DOM
+    // 3) 페이지 전환
     const pages = {
       home:   document.getElementById("page-home"),
       order:  document.getElementById("page-order"),
       check:  document.getElementById("page-check"),
       sales:  document.getElementById("page-sales"),
     };
+    const topbarButtons      = document.getElementById("topbarButtons");
+    const sessionStatusLabel = document.getElementById("sessionStatusLabel");
+    const elapsedTimeSpan    = document.getElementById("elapsedTime");
+    const currentOrderNoSpan = document.getElementById("currentOrderNo");
 
     function showPage(key) {
       Object.values(pages).forEach(p => p.classList.remove("active"));
       pages[key].classList.add("active");
-
-      // 주문하기 화면일 때만 장사 시작/종료 버튼 노출
       if (key === "order") {
         topbarButtons.style.display = "flex";
       } else {
@@ -524,21 +518,15 @@
       }
     }
 
-    // 첫 화면 버튼
     document.getElementById("btnHomeOrder").addEventListener("click", () => showPage("order"));
     document.getElementById("btnHomeCheck").addEventListener("click", () => showPage("check"));
     document.getElementById("btnBackHome").addEventListener("click", () => showPage("home"));
 
-    // 상단 상태
-    const sessionStatusLabel = document.getElementById("sessionStatusLabel");
-    const elapsedTimeSpan    = document.getElementById("elapsedTime");
-    const topbarButtons      = document.getElementById("topbarButtons");
-    const currentOrderNoSpan = document.getElementById("currentOrderNo");
-
-    let isActive       = false;
-    let startedAt      = null;
+    // 4) 세션 상태 & 타이머
+    let isActive        = false;
+    let startedAt       = null;
     let nextOrderNumber = 1;
-    let timerInterval  = null;
+    let timerInterval   = null;
 
     function formatTime(ms) {
       const totalSec = Math.floor(ms / 1000);
@@ -569,8 +557,8 @@
       timerInterval = null;
     }
 
-    // 현재 주문(이 기기에서만 관리)
-    let currentOrder = {}; // { name: { price, qty } }
+    // 5) 현재 주문
+    let currentOrder = {}; // { name: {price, qty} }
 
     function renderMenu(containerId, items) {
       const container = document.getElementById(containerId);
@@ -607,8 +595,7 @@
       list.innerHTML = "";
       let total = 0;
 
-      const entries = Object.entries(currentOrder);
-      entries.forEach(([name, item]) => {
+      Object.entries(currentOrder).forEach(([name, item]) => {
         total += item.price * item.qty;
         const row = document.createElement("div");
         row.className = "order-row";
@@ -647,8 +634,8 @@
       document.getElementById("currentTotal").textContent = total;
     }
 
-    // 세션 상태 실시간 반영
-    onValue(sessionRef, (snap) => {
+    // 6) 세션 상태 실시간
+    sessionRef.on("value", (snap) => {
       const data = snap.val();
       if (!data) {
         isActive = false;
@@ -661,8 +648,8 @@
         return;
       }
 
-      isActive  = !!data.active;
-      startedAt = data.startedAt || null;
+      isActive        = !!data.active;
+      startedAt       = data.startedAt || null;
       nextOrderNumber = data.currentOrderNumber ?? 1;
 
       if (isActive) {
@@ -675,18 +662,16 @@
       }
     });
 
-    // 주문 목록 실시간 반영
-    onValue(ordersRef, (snap) => {
+    // 7) 주문 목록 실시간 (주방용 / 픽업 대기용)
+    ordersRef.on("value", (snap) => {
       const data = snap.val() || {};
       const all = Object.entries(data).map(([id, o]) => ({ id, ...o }));
 
-      // 주방 화면: status = waiting
       const waiting = all
         .filter(o => o.status === "waiting")
         .sort((a,b) => a.orderNumber - b.orderNumber);
       renderKitchen(waiting);
 
-      // 주문하기 화면 왼쪽: status = ready (픽업 대기)
       const ready = all
         .filter(o => o.status === "ready")
         .sort((a,b) => a.orderNumber - b.orderNumber);
@@ -729,8 +714,8 @@
         const btn = document.createElement("button");
         btn.className = "btn-done";
         btn.textContent = "음식 준비 완료";
-        btn.addEventListener("click", async () => {
-          await update(ref(db, `orders/${order.id}`), { status: "ready" });
+        btn.addEventListener("click", () => {
+          db.ref("orders/" + order.id).update({ status: "ready" });
         });
 
         div.appendChild(title);
@@ -769,8 +754,8 @@
         const btn = document.createElement("button");
         btn.className = "btn-pickup";
         btn.textContent = "픽업 완료";
-        btn.addEventListener("click", async () => {
-          await update(ref(db, `orders/${order.id}`), { status: "picked" });
+        btn.addEventListener("click", () => {
+          db.ref("orders/" + order.id).update({ status: "picked" });
         });
 
         div.appendChild(title);
@@ -780,19 +765,18 @@
       });
     }
 
-    // 장사 시작/종료 확인 모달
+    // 8) 장사 시작/종료 확인 모달
     const confirmModalBg   = document.getElementById("confirmModalBg");
     const confirmTitleEl   = document.getElementById("confirmTitle");
     const confirmMessageEl = document.getElementById("confirmMessage");
     const btnConfirmNo     = document.getElementById("btnConfirmNo");
     const btnConfirmYes    = document.getElementById("btnConfirmYes");
-
-    let confirmCallback = null;
+    let confirmCallback    = null;
 
     function openConfirm(title, message, onYes) {
-      confirmTitleEl.textContent = title;
+      confirmTitleEl.textContent   = title;
       confirmMessageEl.textContent = message;
-      confirmCallback = onYes;
+      confirmCallback              = onYes;
       confirmModalBg.style.display = "flex";
     }
 
@@ -807,18 +791,18 @@
       confirmCallback = null;
     });
 
-    // 장사 시작 버튼
+    // 9) 장사 시작
     document.getElementById("btnStart").addEventListener("click", () => {
       openConfirm(
         "장사 시작",
         "장사를 시작하겠습니까? (이전 주문 기록은 초기화됩니다.)",
         async () => {
-          await set(sessionRef, {
+          await sessionRef.set({
             active: true,
             currentOrderNumber: 1,
             startedAt: Date.now()
           });
-          await set(ordersRef, null);
+          await ordersRef.set(null);
           currentOrder = {};
           renderCurrentOrder();
           alert("장사를 시작했습니다.");
@@ -826,20 +810,20 @@
       );
     });
 
-    // 장사 종료 버튼
+    // 10) 장사 종료
     document.getElementById("btnStop").addEventListener("click", () => {
       openConfirm(
         "장사 종료",
         "정말 장사를 종료하시겠습니까?",
         async () => {
-          await update(sessionRef, { active: false });
+          await sessionRef.update({ active: false });
           alert("장사가 종료되었습니다!");
-          await showSalesPage();  // 매출 확인 화면으로 이동
+          await showSalesPage();
         }
       );
     });
 
-    // 주문 등록
+    // 11) 주문 등록
     document.getElementById("btnSubmitOrder").addEventListener("click", async () => {
       if (!isActive) {
         alert("장사를 시작한 후 주문을 받아주세요.");
@@ -851,8 +835,7 @@
         return;
       }
 
-      // 최신 세션 정보 가져와서 주문번호 확보
-      const sessSnap = await get(sessionRef);
+      const sessSnap = await sessionRef.get();
       const sess = sessSnap.val();
       if (!sess || !sess.active) {
         alert("세션 정보가 없습니다. 장사 시작을 다시 눌러주세요.");
@@ -860,7 +843,6 @@
       }
       const orderNumber = sess.currentOrderNumber ?? 1;
 
-      // 총액 & DB용 아이템 구조
       let total = 0;
       const itemsForDb = {};
       entries.forEach(([name, item]) => {
@@ -868,30 +850,30 @@
         itemsForDb[name] = { price: item.price, qty: item.qty };
       });
 
-      const newRef = push(ordersRef);
-      await set(newRef, {
+      const newRef = ordersRef.push();
+      await newRef.set({
         orderNumber,
         total,
         items: itemsForDb,
-        status: "waiting", // 주문확인 화면에서 음식 준비 전 상태
+        status: "waiting",
         createdAt: Date.now()
       });
 
-      await update(sessionRef, { currentOrderNumber: orderNumber + 1 });
+      await sessionRef.update({ currentOrderNumber: orderNumber + 1 });
 
       currentOrder = {};
       renderCurrentOrder();
       alert(`주문번호 ${orderNumber}번을 등록했습니다.`);
     });
 
-    // 매출 확인 화면으로 이동 + 집계
+    // 12) 매출 확인 화면
     async function showSalesPage() {
-      const snap = await get(ordersRef);
+      const snap = await ordersRef.get();
       const data = snap.val() || {};
 
       let totalSales = 0;
       let totalQty   = 0;
-      const salesByMenu = {}; // {name: {qty, revenue}}
+      const salesByMenu = {};
 
       Object.values(data).forEach(order => {
         totalSales += order.total || 0;
@@ -911,16 +893,16 @@
       tbody.innerHTML = "";
 
       Object.entries(salesByMenu).forEach(([name, info]) => {
-        const tr = document.createElement("tr");
-        const tdName = document.createElement("td");
-        const tdQty  = document.createElement("td");
-        const tdRev  = document.createElement("td");
-        tdName.textContent = name;
-        tdQty.textContent  = info.qty;
-        tdRev.textContent  = info.revenue + "원";
-        tr.appendChild(tdName);
-        tr.appendChild(tdQty);
-        tr.appendChild(tdRev);
+        const tr    = document.createElement("tr");
+        const tdN   = document.createElement("td");
+        const tdQ   = document.createElement("td");
+        const tdR   = document.createElement("td");
+        tdN.textContent = name;
+        tdQ.textContent = info.qty;
+        tdR.textContent = info.revenue + "원";
+        tr.appendChild(tdN);
+        tr.appendChild(tdQ);
+        tr.appendChild(tdR);
         tbody.appendChild(tr);
       });
 
@@ -929,7 +911,6 @@
 
       showPage("sales");
     }
-
   </script>
 </body>
 </html>
